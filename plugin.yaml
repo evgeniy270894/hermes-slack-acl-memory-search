@@ -1,0 +1,18 @@
+name: hermes-slack-acl-memory-search
+version: 1.0.0
+description: >
+  Replaces the built-in session_search with an ACL-scoped version. In a Slack
+  channel it returns only that channel's sessions; in a DM it returns the
+  asker's own sessions plus channels they belong to. Fails closed.
+author: evgeniy270894
+kind: standalone
+
+provides_tools:
+  - session_search
+
+provides_hooks:
+  - pre_gateway_dispatch
+
+# Deliberately NO `requires_env: [SLACK_BOT_TOKEN]`. A missing variable would
+# disable the plugin, which leaves the unfiltered built-in tool in place —
+# fail-open. Token absence must degrade inside the resolver instead.
