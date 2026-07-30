@@ -24,6 +24,19 @@ logger = logging.getLogger(__name__)
 _ORIGINAL = None
 
 
+def tool_handler(args: dict, **kwargs) -> str:
+    """Registry entry point.
+
+    Must be DEFINED here, in the package root. Hermes authorises an override by
+    `handler.__globals__["__name__"]` (tools/registry.py:_plugin_owner_of) but
+    registers the permission against the package root only. A handler declared
+    in a submodule resolves to `<pkg>.tool`, finds no policy, and the override
+    is rejected — with a message that points at config keys which are in fact
+    already correct.
+    """
+    return tool.handler(args, **kwargs)
+
+
 def _install_module_patch() -> None:
     """Idempotent: plugin modules are re-executed on discover(force=True)."""
     global _ORIGINAL
@@ -52,7 +65,7 @@ def register(ctx) -> None:
         name="session_search",
         toolset=selfcheck.EXPECTED_TOOLSET,  # distinct name so the override is audit-logged
         schema=tool.build_schema(),
-        handler=tool.handler,
+        handler=tool_handler,
         check_fn=tool.check,
         emoji="🔒",
         description="Search past conversations you are entitled to see.",

@@ -63,6 +63,20 @@ agent:
 
 `disabled_toolsets` оставляется намеренно: если плагин однажды не загрузится, штатный нефильтрованный инструмент не подхватится вместо него.
 
+## Ловушка при разработке плагинов с override
+
+Handler должен быть **объявлен в `__init__.py`**, а не в подмодуле.
+
+Hermes авторизует переопределение встроенного инструмента по `handler.__globals__["__name__"]` (`tools/registry.py`, `_plugin_owner_of`), но регистрирует разрешение только на корень пакета. Handler, объявленный в `tool.py`, разрешается в `<pkg>.tool`, политики для него нет, и регистрация отклоняется — с сообщением, которое указывает на ключи конфига, хотя они уже выставлены верно:
+
+```
+Tool registration REJECTED: plugin 'hermes_plugins.<pkg>.tool' attempted to
+override built-in tool 'session_search' ... Set
+plugins.entries.<plugin_id>.allow_tool_override: true in config.yaml
+```
+
+Поэтому `__init__.py` объявляет тонкую обёртку `tool_handler`, а вся логика остаётся в `tool.py`.
+
 ## Ограничения
 
 Плагин закрывает поиск, но не заменяет остальные слои защиты:

@@ -30,13 +30,13 @@ _INTERCEPTED = (
 def _check_registry(problems: List[str]) -> None:
     from tools.registry import registry
 
-    from . import tool
+    import hermes_plugins.hermes_slack_acl_memory_search as pkg
 
     entry = registry.get_entry("session_search")
     if entry is None:
         problems.append("session_search is not registered")
         return
-    if getattr(entry, "handler", None) is not tool.handler:
+    if getattr(entry, "handler", None) is not pkg.tool_handler:
         problems.append("registry handler is not ours")
     if getattr(entry, "toolset", None) != EXPECTED_TOOLSET:
         problems.append(f"registry toolset is {getattr(entry, 'toolset', None)!r}")
