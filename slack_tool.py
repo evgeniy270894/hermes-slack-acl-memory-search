@@ -77,23 +77,38 @@ def _client():
     return WebClient(token=tokens[0], timeout=_SLACK_TIMEOUT)
 
 
-def _call(client, method: str, **kwargs):
-    """One Slack call with Retry-After-aware backoff.
+def _retrying(fn):
+    """Run a Slack call with Retry-After-aware backoff.
 
-    The adapter's own retry ignores Retry-After and computes 1s/2s from the
-    attempt counter; that is fine at Tier 3 and wrong everywhere else, so it is
-    not copied here.
+    The adapter's own retry ignores Retry-After and derives 1s/2s from the
+    attempt counter; that is harmless at Tier 3 and wrong everywhere else
+    (Real-time Search is 10/min), so it is not copied here.
     """
     for attempt in range(3):
         try:
-            return getattr(client, method)(**kwargs)
+            return fn()
         except Exception as exc:
-            retry_after = getattr(getattr(exc, "response", None), "headers", {}) or {}
-            wait = retry_after.get("Retry-After") or retry_after.get("retry-after")
+            headers = getattr(getattr(exc, "response", None), "headers", {}) or {}
+            wait = headers.get("Retry-After") or headers.get("retry-after")
             if wait is None or attempt == 2:
                 raise
             time.sleep(min(float(wait), 30.0))
     raise RuntimeError("unreachable")
+
+
+def _call(client, method: str, **kwargs):
+    """Invoke a named slack_sdk method."""
+    return _retrying(lambda: getattr(client, method)(**kwargs))
+
+
+def _api(client, api_path: str, **payload):
+    """Invoke a Web API endpoint the installed SDK has no binding for.
+
+    slack_sdk 3.43.0 (the version Hermes pins) predates the Real-time Search
+    API: WebClient exposes only the legacy search_* methods, so
+    `assistant.search.context` has to go through the generic escape hatch.
+    """
+    return _retrying(lambda: client.api_call(api_path, json=payload))
 
 
 def _user_name(client, user_id: str) -> str:
@@ -247,9 +262,9 @@ def _search(client, args: dict, ctx, sc) -> dict:
         }
 
     limit = _clamp(args.get("limit"), _SEARCH_MAX, _SEARCH_MAX)
-    resp = _call(
+    resp = _api(
         client,
-        "assistant_search_context",
+        "assistant.search.context",
         query=query,
         limit=limit,
         action_token=token,
@@ -257,7 +272,15 @@ def _search(client, args: dict, ctx, sc) -> dict:
     if not resp.get("ok"):
         return {"error": f"slack: {resp.get('error')}"}
 
-    results = ((resp.get("results") or {}).get("messages")) or []
+    payload = resp.get("results")
+    if isinstance(payload, dict):
+        results = payload.get("messages") or []
+    elif isinstance(payload, list):
+        results = payload
+    else:
+        results = resp.get("messages") or []
+    if not results:
+        logger.info("slack search returned no messages; response keys=%s", sorted(resp.data or {}))
     hits = []
     for item in results:
         text = (item.get("content") or item.get("text") or "").strip()

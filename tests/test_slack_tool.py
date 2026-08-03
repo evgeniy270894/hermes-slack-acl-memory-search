@@ -47,9 +47,13 @@ class FakeClient:
         self.calls.append(("replies", kw))
         return FakeResp(ok=True, messages=[{"ts": "1.0", "user": USER, "text": "reply"}])
 
-    def assistant_search_context(self, **kw):
-        self.calls.append(("search", kw))
-        return FakeResp(ok=True, results={"messages": []})
+    def api_call(self, api_path, json=None, **kw):
+        # slack_sdk 3.43.0 has no binding for assistant.search.context, so the
+        # tool goes through the generic escape hatch — mirror that here.
+        self.calls.append(("search", {"api_path": api_path, **(json or {})}))
+        resp = FakeResp(ok=True, results={"messages": []})
+        resp.data = dict(resp)
+        return resp
 
     def users_info(self, **kw):
         return FakeResp(ok=True, user={"profile": {"display_name": "Ann"}})
@@ -163,6 +167,7 @@ class TestSearch(unittest.TestCase):
         self.assertEqual(payload.get("count"), 0)
         self.assertEqual(client.calls[0][0], "search")
         self.assertEqual(client.calls[0][1]["action_token"], "xoxa-test")
+        self.assertEqual(client.calls[0][1]["api_path"], "assistant.search.context")
 
     def test_token_is_not_shared_across_users(self):
         event = types.SimpleNamespace(
