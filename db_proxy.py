@@ -181,6 +181,14 @@ class ScopedSessionDB:
             return session_id
         return None
 
+    def fts_rebuild_status(self, *args, **kwargs):
+        # Index-rebuild counters only (total / indexed / percent) — no session
+        # or message content, so there is nothing to scope. Hermes v2026.7.30
+        # added this call to _annotate_rebuild_status(); its call site swallows
+        # exceptions, so without this passthrough search keeps working but
+        # silently loses the "index still rebuilding" note.
+        return self._inner.fts_rebuild_status(*args, **kwargs)
+
     @property
     def _conn(self):
         return _RestrictedConn(self._inner._conn, self)
