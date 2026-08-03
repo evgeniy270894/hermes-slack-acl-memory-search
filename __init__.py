@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import logging
 
-from . import acl, action_token, selfcheck, tool
+from . import acl, action_token, selfcheck, slack_tool, tool
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +35,18 @@ def tool_handler(args: dict, **kwargs) -> str:
     already correct.
     """
     return tool.handler(args, **kwargs)
+
+
+def slack_tool_handler(args: dict, **kwargs) -> str:
+    """Registry entry point for the Slack read/search tool.
+
+    A brand-new tool name needs no override permission (registry.register only
+    consults the plugin-override policy when the name already exists under a
+    different toolset), so unlike session_search this one is not forced to live
+    in the package root. It is declared here anyway, next to its sibling, so
+    both entry points are found in one place.
+    """
+    return slack_tool.handler(args, **kwargs)
 
 
 def _install_module_patch() -> None:
@@ -71,6 +83,17 @@ def register(ctx) -> None:
         description="Search past conversations you are entitled to see.",
         override=True,
     )
+
+    ctx.register_tool(
+        name=slack_tool.TOOL_NAME,
+        toolset=slack_tool.TOOLSET,
+        schema=slack_tool.build_schema(),
+        handler=slack_tool_handler,
+        check_fn=slack_tool.check,
+        emoji="💬",
+        description="Read and search Slack, scoped to what the asker may already see.",
+    )
+    slack_tool.mark_untrusted()
 
     _install_module_patch()
     ctx.register_hook("pre_gateway_dispatch", acl.capture_gateway)

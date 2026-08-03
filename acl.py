@@ -77,6 +77,11 @@ def _bot_tokens() -> List[str]:
         return []
 
 
+def bot_tokens() -> List[str]:
+    """Public alias for sibling modules that need to build their own client."""
+    return _bot_tokens()
+
+
 def _fetch_for_token(token: str, user_id: str) -> Optional[FrozenSet[str]]:
     """Channels `user_id` belongs to, as visible to this token. None on error."""
     try:
