@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import logging
 
-from . import acl, selfcheck, tool
+from . import acl, action_token, selfcheck, tool
 
 logger = logging.getLogger(__name__)
 
@@ -74,4 +74,5 @@ def register(ctx) -> None:
 
     _install_module_patch()
     ctx.register_hook("pre_gateway_dispatch", acl.capture_gateway)
+    ctx.register_hook("pre_gateway_dispatch", action_token.capture)
     selfcheck.assert_installed()
