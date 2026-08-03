@@ -182,12 +182,20 @@ class ScopedSessionDB:
         return None
 
     def fts_rebuild_status(self, *args, **kwargs):
-        # Index-rebuild counters only (total / indexed / percent) — no session
-        # or message content, so there is nothing to scope. Hermes v2026.7.30
-        # added this call to _annotate_rebuild_status(); its call site swallows
-        # exceptions, so without this passthrough search keeps working but
-        # silently loses the "index still rebuilding" note.
-        return self._inner.fts_rebuild_status(*args, **kwargs)
+        """Always None. Do not forward this to the inner DB.
+
+        Hermes v2026.7.30 added this call in _annotate_rebuild_status(), which
+        renders the result into a user-visible note: "the index is rebuilding
+        (N of M messages)". Those counters span **every** session in the shared
+        state.db, so forwarding them would tell any caller how much traffic the
+        whole company's bot has — global metadata this proxy exists to withhold.
+
+        Returning None makes the annotation a no-op, which is exactly what the
+        caller does when no rebuild is pending. This is declared explicitly
+        rather than left to __getattr__ so the intent survives a future reader,
+        and so a routine search does not log a blocked-attribute error each time.
+        """
+        return None
 
     @property
     def _conn(self):

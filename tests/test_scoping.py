@@ -226,6 +226,18 @@ class TestUnknownAttribute(unittest.TestCase):
             proxy.some_future_method
 
 
+class TestGlobalCountersWithheld(unittest.TestCase):
+    def test_fts_rebuild_status_is_never_forwarded(self):
+        """Rebuild counters cover every session in the shared DB, so the caller
+        must get None regardless of what the real DB would report."""
+        inner = build_db()
+        inner.fts_rebuild_status = lambda *a, **k: {
+            "pending": True, "total": 900000, "indexed": 12, "percent": 0,
+        }
+        proxy = ScopedSessionDB(inner, Scope(frozenset({CHANNEL_A}), frozenset(), CHANNEL_A))
+        self.assertIsNone(proxy.fts_rebuild_status())
+
+
 class TestScopeResolution(unittest.TestCase):
     def test_channel_scope_ignores_acl(self):
         ctx = AskingContext("slack", CHANNEL_A, USER_1, "group", "s1")
