@@ -30,9 +30,11 @@ _MAX_ENTRIES = 500
 _CACHE: Dict[Tuple[str, str], Tuple[float, str]] = {}
 _LOCK = threading.Lock()
 
-# One-shot: confirms empirically whether Slack ships the field at all, without
-# ever writing the value to a log.
-_SHAPE_LOGGED = False
+# Confirms empirically whether Slack ships the field, without ever writing the
+# value to a log. Keyed by event type: a single global one-shot burns itself on
+# whichever event happens to arrive first — a slash-command payload, say, which
+# never carries an action_token and so proves nothing about message events.
+_SHAPES_LOGGED: set = set()
 
 
 def _prune(now: float) -> None:
@@ -46,16 +48,19 @@ def _prune(now: float) -> None:
 
 def capture(event: Any = None, **_kwargs) -> None:
     """pre_gateway_dispatch observer. Always returns None — never influences dispatch."""
-    global _SHAPE_LOGGED
     try:
         raw = getattr(event, "raw_message", None)
         if not isinstance(raw, dict):
             return None
 
-        if not _SHAPE_LOGGED:
-            _SHAPE_LOGGED = True
+        kind = str(raw.get("type") or ("slash_command" if "command" in raw else "unknown"))
+        subtype = str(raw.get("channel_type") or "")
+        shape_key = f"{kind}:{subtype}"
+        if shape_key not in _SHAPES_LOGGED:
+            _SHAPES_LOGGED.add(shape_key)
             logger.info(
-                "action_token probe: inbound slack event carries fields %s (action_token present: %s)",
+                "action_token probe [%s]: fields %s (action_token present: %s)",
+                shape_key,
                 sorted(raw.keys()),
                 "action_token" in raw,
             )
@@ -97,3 +102,4 @@ def get(chat_id: str, user_id: str) -> Optional[str]:
 def clear_cache() -> None:
     with _LOCK:
         _CACHE.clear()
+    _SHAPES_LOGGED.clear()
