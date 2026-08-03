@@ -177,17 +177,49 @@ def _resolve() -> Tuple[Optional[scope.AskingContext], Optional[scope.Scope]]:
     return ctx, sc
 
 
-def _target_channel(requested: Any, ctx: scope.AskingContext, sc: scope.Scope) -> Optional[str]:
-    """Validate the requested channel against the permitted set.
+def _directory() -> List[Dict[str, Any]]:
+    """The gateway's channel roster: id + name for every channel the bot is in.
 
-    Defaults to the current chat when the model omits it, which is the common
-    case for "what was said here".
+    Rebuilt from users.conversations every 5 minutes and cached to disk, so
+    reading it costs no API call.
     """
-    channel = (str(requested).strip() if requested else "") or ctx.chat_id
+    try:
+        from gateway.channel_directory import load_directory
+
+        return (load_directory().get("platforms") or {}).get("slack") or []
+    except Exception:
+        return []
+
+
+def _resolve_name(name: str) -> Optional[str]:
+    """"#engineering" / "engineering" / a raw id -> channel id, or None."""
+    try:
+        from gateway.channel_directory import resolve_channel_name
+
+        return resolve_channel_name("slack", name)
+    except Exception:
+        return None
+
+
+def _target_channel(requested: Any, ctx: scope.AskingContext, sc: scope.Scope) -> Optional[str]:
+    """Resolve and authorise a channel reference.
+
+    Defaults to the current chat when the model omits it — the common case for
+    "what was said here". Names are resolved through the gateway directory so
+    people can write #engineering instead of C0123ABCDEF.
+    """
+    raw = str(requested).strip() if requested else ""
+    if not raw:
+        return ctx.chat_id
+
+    channel = _resolve_name(raw) or raw
     if channel not in sc.chat_ids:
+        # One message for both "no such channel" and "not yours". Splitting them
+        # would turn the tool into an oracle for which channels the bot sits in,
+        # including private ones.
         logger.info(
-            "slack tool: refusing channel %r for user %s (scope=%s)",
-            channel, ctx.user_id, sc.reason,
+            "slack tool: refusing %r (resolved=%r) for user %s (scope=%s)",
+            raw, channel, ctx.user_id, sc.reason,
         )
         return None
     return channel
@@ -304,7 +336,22 @@ def _search(client, args: dict, ctx, sc) -> dict:
     }
 
 
+def _list_channels(client, args: dict, ctx, sc) -> dict:
+    """What this caller may actually read — so the model stops guessing ids."""
+    seen = set()
+    rows = []
+    for entry in _directory():
+        cid = entry.get("id") or ""
+        # Directory rows include per-thread pseudo-entries ("C123:169...").
+        base = cid.split(":", 1)[0]
+        if base in sc.chat_ids and base not in seen:
+            seen.add(base)
+            rows.append({"id": base, "name": entry.get("name") or base})
+    return {"scope": sc.reason, "count": len(rows), "channels": rows}
+
+
 _ACTIONS = {
+    "list_channels": _list_channels,
     "read_channel": _read_channel,
     "read_thread": _read_thread,
     "search": _search,
@@ -353,11 +400,12 @@ def build_schema() -> dict:
         "function": {
             "name": TOOL_NAME,
             "description": (
-                "Read or search Slack. Actions: read_channel (recent messages of a "
-                "channel; defaults to the current one), read_thread (replies of one "
-                "thread), search (semantic search across public channels). Only "
-                "content the person you are replying to may already see is returned; "
-                "out-of-scope requests are refused."
+                "Read or search Slack. Actions: list_channels (which channels you may "
+                "read here — call this first if unsure), read_channel (recent messages; "
+                "defaults to the current conversation), read_thread (replies of one "
+                "thread), search (semantic search across public channels). Only content "
+                "the person you are replying to may already see is returned; anything "
+                "else is refused. Channels may be given by name (#engineering) or id."
             ),
             "parameters": {
                 "type": "object",
@@ -370,8 +418,8 @@ def build_schema() -> dict:
                     "channel": {
                         "type": "string",
                         "description": (
-                            "Channel id (C…/G…/D…). Omit to use the current conversation. "
-                            "read_channel and read_thread only."
+                            "Channel name (#engineering) or id (C…/G…/D…). Omit to use "
+                            "the current conversation. read_channel and read_thread only."
                         ),
                     },
                     "thread_ts": {

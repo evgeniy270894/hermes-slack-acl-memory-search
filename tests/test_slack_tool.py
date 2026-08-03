@@ -177,6 +177,42 @@ class TestSearch(unittest.TestCase):
         self.assertIsNone(action_token.get(CHANNEL_MINE, "U_SOMEONE_ELSE"))
 
 
+class TestNameResolution(unittest.TestCase):
+    def test_a_name_resolves_and_is_then_authorised(self):
+        with mock.patch.object(slack_tool, "_resolve_name", return_value=CHANNEL_MINE):
+            payload, client = run({"action": "read_channel", "channel": "#mine"}, chat_id=DM)
+        self.assertEqual(payload.get("channel"), CHANNEL_MINE)
+        self.assertEqual(client.calls[0][0], "history")
+
+    def test_resolution_does_not_bypass_scope(self):
+        """A resolvable name still has to survive the membership check."""
+        with mock.patch.object(slack_tool, "_resolve_name", return_value=CHANNEL_OTHER):
+            payload, client = run({"action": "read_channel", "channel": "#secret"}, chat_id=DM)
+        self.assertIn("error", payload)
+        self.assertEqual(client.calls, [])
+
+    def test_unknown_name_is_refused_the_same_way_as_a_forbidden_one(self):
+        """Distinguishing them would leak which channels the bot sits in."""
+        with mock.patch.object(slack_tool, "_resolve_name", return_value=None):
+            unknown, _ = run({"action": "read_channel", "channel": "#nope"}, chat_id=DM)
+        with mock.patch.object(slack_tool, "_resolve_name", return_value=CHANNEL_OTHER):
+            forbidden, _ = run({"action": "read_channel", "channel": "#secret"}, chat_id=DM)
+        self.assertEqual(unknown["error"], forbidden["error"])
+
+
+class TestListChannels(unittest.TestCase):
+    def test_lists_only_in_scope_channels_and_folds_thread_rows(self):
+        directory = [
+            {"id": CHANNEL_MINE, "name": "mine"},
+            {"id": f"{CHANNEL_MINE}:1785.1", "name": "mine / topic"},
+            {"id": CHANNEL_OTHER, "name": "secret"},
+        ]
+        with mock.patch.object(slack_tool, "_directory", return_value=directory):
+            payload, client = run({"action": "list_channels"}, chat_id=DM)
+        self.assertEqual([c["id"] for c in payload["channels"]], [CHANNEL_MINE])
+        self.assertEqual(client.calls, [])
+
+
 class TestUntrustedMarking(unittest.TestCase):
     def test_tool_name_is_added_to_the_untrusted_set(self):
         helpers = types.ModuleType("agent.tool_dispatch_helpers")
