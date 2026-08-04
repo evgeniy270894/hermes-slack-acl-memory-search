@@ -102,6 +102,15 @@ def resolve_asking_context(db, current_session_id: str) -> Optional[AskingContex
         # Session row not written yet (first turn) — derive from the Slack id.
         chat_type = _chat_type_from_prefix(chat_id)
 
+    # A Slack group DM (mpim) arrives as chat_type "dm", but it is a room other
+    # people are reading — and "dm" earns the wide scope (the asker's own
+    # sessions plus every channel they belong to). Trust the id shape over the
+    # row: only a real 1:1 DM starts with "D". Without this, one member asking a
+    # normal question prints another member's private conversation into the room.
+    if chat_type == "dm" and not chat_id.startswith(_DM_PREFIX):
+        logger.info("scope: %r is not a 1:1 DM, narrowing verdict to group", chat_id)
+        chat_type = "group"
+
     if chat_type not in ("dm", "group"):
         logger.info("scope: refusing, unresolved chat_type for chat_id=%r", chat_id)
         return None

@@ -26,6 +26,7 @@ _scope_mod = importlib.import_module(f"{_PKG}.scope")
 AskingContext = _scope_mod.AskingContext
 Scope = _scope_mod.Scope
 resolve_scope = _scope_mod.resolve_scope
+resolve_asking_context = _scope_mod.resolve_asking_context
 
 CHANNEL_A = "C_AAA"
 CHANNEL_B = "C_BBB"
@@ -236,6 +237,41 @@ class TestGlobalCountersWithheld(unittest.TestCase):
         }
         proxy = ScopedSessionDB(inner, Scope(frozenset({CHANNEL_A}), frozenset(), CHANNEL_A))
         self.assertIsNone(proxy.fts_rebuild_status())
+
+
+class TestGroupDmIsNotADm(unittest.TestCase):
+    """A Slack mpim (G…) must never earn the wide DM scope.
+
+    The adapter reports chat_type "dm" for a group DM, but it is a room other
+    people read — and the DM verdict admits the asker's private 1:1 sessions.
+    """
+
+    MPIM = "G_GROUP_DM"
+
+    def _ctx(self, chat_id, row_chat_type):
+        env = {
+            "HERMES_SESSION_PLATFORM": "slack",
+            "HERMES_SESSION_CHAT_ID": chat_id,
+            "HERMES_SESSION_USER_ID": USER_1,
+        }
+        db = mock.Mock()
+        db.get_session.return_value = {"chat_id": chat_id, "chat_type": row_chat_type}
+        with mock.patch(f"{_PKG}.scope._session_env", side_effect=lambda n: env.get(n, "")):
+            return resolve_asking_context(db, "s1")
+
+    def test_row_claiming_dm_for_an_mpim_is_overridden(self):
+        self.assertEqual(self._ctx(self.MPIM, "dm").chat_type, "group")
+
+    def test_real_one_to_one_dm_still_resolves_as_dm(self):
+        self.assertEqual(self._ctx(DM_U1, "dm").chat_type, "dm")
+
+    def test_mpim_scope_is_the_room_only(self):
+        ctx = self._ctx(self.MPIM, "dm")
+        acl = mock.Mock()
+        scope = resolve_scope(ctx, acl)
+        self.assertEqual(scope.chat_ids, frozenset({self.MPIM}))
+        self.assertEqual(scope.user_ids, frozenset())
+        acl.channels_for_user.assert_not_called()
 
 
 class TestScopeResolution(unittest.TestCase):
